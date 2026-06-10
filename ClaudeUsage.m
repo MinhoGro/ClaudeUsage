@@ -229,18 +229,79 @@ static void MirrorToWidgetContainer(NSString *planName) {
         rename(tmp.fileSystemRepresentation, path.fileSystemRepresentation);
 }
 
-// ─── OAuth token lookup (read-only) ──────────────────────────────
-// 1) ~/.claude/.credentials.json  2) Keychain "Claude Code-credentials".
-// Returns nil if absent or expired. Never writes anything back.
-// *deniedOut is set when the user refused the Keychain prompt, so the
-// caller can stop re-prompting every poll.
+// ─── Claude Code OAuth token: read + auto-refresh ────────────────
+// Source: ~/.claude/.credentials.json, else Keychain "Claude Code-credentials".
+// When the access token is expired we refresh it ourselves using the refresh
+// token and write the rotated tokens back to the SAME source — keeping Claude
+// Code in sync (it reads the same store).
+static NSString *const kCCService     = @"Claude Code-credentials";
+static NSString *const kOAuthClient   = @"9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+static NSString *const kOAuthTokenURL = @"https://api.anthropic.com/v1/oauth/token";
+static NSString *CredsFilePath(void) {
+    return [NSHomeDirectory() stringByAppendingPathComponent:@".claude/.credentials.json"];
+}
+
+// Write the full credentials item back to its source. Returns success.
+static BOOL PersistCreds(NSDictionary *full, BOOL toFile) {
+    NSData *d = [NSJSONSerialization dataWithJSONObject:full options:0 error:nil];
+    if (!d) return NO;
+    if (toFile) return [d writeToFile:CredsFilePath() atomically:YES];
+    NSDictionary *q = @{ (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+                         (__bridge id)kSecAttrService: kCCService };
+    return SecItemUpdate((__bridge CFDictionaryRef)q,
+                         (__bridge CFDictionaryRef)@{ (__bridge id)kSecValueData: d }) == errSecSuccess;
+}
+
+// Synchronously refresh the access token and persist the rotated tokens.
+// SAFETY: probe-write the unchanged item first; only refresh if we can write
+// back — so a rotated refresh token is never left unpersisted (which would
+// break Claude Code's login). Returns the new access token, or nil (no change).
+static NSString *RefreshAccessToken(NSMutableDictionary *full, NSString *refreshToken, BOOL fromFile) {
+    if (![refreshToken isKindOfClass:NSString.class] || !refreshToken.length) return nil;
+    if (!PersistCreds(full, fromFile)) return nil;   // probe: writable?
+
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:kOAuthTokenURL]];
+    req.HTTPMethod = @"POST";
+    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    req.HTTPBody = [NSJSONSerialization dataWithJSONObject:@{
+        @"grant_type": @"refresh_token", @"refresh_token": refreshToken, @"client_id": kOAuthClient
+    } options:0 error:nil];
+    req.timeoutInterval = 20;
+
+    __block NSData *rd = nil; __block NSInteger code = 0;
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    [[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
+        rd = d; code = [(NSHTTPURLResponse *)r statusCode]; dispatch_semaphore_signal(sem);
+    }] resume];
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(25 * NSEC_PER_SEC)));
+    if (code != 200 || !rd) return nil;
+
+    id j = [NSJSONSerialization JSONObjectWithData:rd options:0 error:nil];
+    if (![j isKindOfClass:NSDictionary.class]) return nil;
+    NSString *acc = j[@"access_token"];
+    if (![acc isKindOfClass:NSString.class] || !acc.length) return nil;
+    NSString *ref = [j[@"refresh_token"] isKindOfClass:NSString.class] ? j[@"refresh_token"] : refreshToken;
+    double in = [j[@"expires_in"] isKindOfClass:NSNumber.class] ? [j[@"expires_in"] doubleValue] : 3600;
+
+    NSMutableDictionary *oauth = [([full[@"claudeAiOauth"] isKindOfClass:NSDictionary.class]
+                                   ? full[@"claudeAiOauth"] : @{}) mutableCopy];
+    oauth[@"accessToken"]  = acc;
+    oauth[@"refreshToken"] = ref;
+    oauth[@"expiresAt"]    = @((long long)((NSDate.date.timeIntervalSince1970 + in) * 1000.0));
+    full[@"claudeAiOauth"] = oauth;
+    PersistCreds(full, fromFile);   // persist rotated tokens (probe already confirmed writable)
+    return acc;
+}
+
+// *deniedOut is set when the Keychain read is refused, so the caller backs off.
 static NSString *FindOAuthToken(BOOL allowKeychain, BOOL *deniedOut) {
-    NSData *blob = [NSData dataWithContentsOfFile:
-        [NSHomeDirectory() stringByAppendingPathComponent:@".claude/.credentials.json"]];
+    BOOL fromFile = YES;
+    NSData *blob = [NSData dataWithContentsOfFile:CredsFilePath()];
     if (!blob && allowKeychain) {
+        fromFile = NO;
         NSDictionary *q = @{
             (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-            (__bridge id)kSecAttrService: @"Claude Code-credentials",
+            (__bridge id)kSecAttrService: kCCService,
             (__bridge id)kSecReturnData: @YES,
             (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitOne,
         };
@@ -249,16 +310,18 @@ static NSString *FindOAuthToken(BOOL allowKeychain, BOOL *deniedOut) {
         if (st == errSecSuccess && out)
             blob = CFBridgingRelease(out);
         else if (st != errSecItemNotFound && deniedOut)
-            *deniedOut = YES;  // user hit Deny (or access blocked) — back off
+            *deniedOut = YES;
     }
     if (!blob) return nil;
     id o = [NSJSONSerialization JSONObjectWithData:blob options:0 error:nil];
     if (![o isKindOfClass:NSDictionary.class]) return nil;
-    NSDictionary *oauth = [o[@"claudeAiOauth"] isKindOfClass:NSDictionary.class] ? o[@"claudeAiOauth"] : nil;
+    NSMutableDictionary *full = [o mutableCopy];
+    NSDictionary *oauth = [full[@"claudeAiOauth"] isKindOfClass:NSDictionary.class] ? full[@"claudeAiOauth"] : nil;
     NSString *tok = oauth[@"accessToken"];
     if (![tok isKindOfClass:NSString.class] || !tok.length) return nil;
     NSDate *exp = ParseDateValue(oauth[@"expiresAt"]);
-    if (exp && exp.timeIntervalSinceNow < 60) return nil;  // expired — let CC renew it
+    if (exp && exp.timeIntervalSinceNow < 120)             // expired / about to → refresh
+        return RefreshAccessToken(full, oauth[@"refreshToken"], fromFile);
     return tok;
 }
 

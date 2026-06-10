@@ -70,9 +70,10 @@ macOS 画廊后台 `chronod` 对第三方扩展有签名信任闸门：**只接�
 
 ## 数据来源与隐私
 
-主数据源是 **Anthropic 官方用量接口** `api.anthropic.com/api/oauth/usage`，使用 **Claude Code 自己的登录令牌**（从钥匙串 `Claude Code-credentials` 或 `~/.claude/.credentials.json` 读取，**只读**，绝不修改、续期或上传）。
+主数据源是 **Anthropic 官方用量接口** `api.anthropic.com/api/oauth/usage`，使用 **Claude Code 自己的登录令牌**（从钥匙串 `Claude Code-credentials` 或 `~/.claude/.credentials.json` 读取）。
 
-- 前提：终端里 `claude` 已用订阅账号登录。首次读钥匙串时 macOS 会弹授权窗，点「始终允许」。
+- **自动续期**：令牌快过期时，用其 refresh token 向官方端点换取新令牌，并把轮换后的令牌写回同一处（与 Claude Code 共享同一份，保持同步）——因此长期自给自足，不需要你手动打开 Claude Code 续期。除此之外不上传任何数据，全部本地。
+- 前提：终端里 `claude` 已用订阅账号登录。首次读 / 写钥匙串时 macOS 可能弹授权窗，点「始终允许」。
 - 同时尝试从 OAuth profile 自动识别套餐（Pro / Max），失败可在菜单里手选。
 - **可选回退**：Claude Code 的 `statusLine` 钩子（`statusline.py`）把用量写进 `~/.claude/usage-cache.json`，无令牌时作为后备数据源。手动启用：在 `~/.claude/settings.json` 增加
   ```json
