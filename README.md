@@ -14,6 +14,12 @@
 - **桌面悬浮版**：钉在桌面层（墙纸之上、窗口之下）的圆环卡片（[预览](preview-widget.png)），**默认隐藏**，可从菜单栏「显示桌面组件」开启
 - **每 60 秒自动刷新**，不依赖 Claude Code 是否在运行；颜色按剩余量绿/黄/橙/红
 
+## 下载
+
+[`release/ClaudeUsage.dmg`](release/ClaudeUsage.dmg) 是最新构建的签名版。
+
+> ⚠️ 它用**免费 Apple Development 证书**签名,只在**构建它的那台 Mac** 上受信任。其他人直接打开会被 Gatekeeper 拦下、原生小组件也进不了画廊——请按下方「构建与安装」用**你自己的 Apple ID** 自行编译。要做成人人可用的分发包,需付费 Developer ID + 公证(见「签名」一节)。
+
 ## 环境要求
 
 - macOS 14+
