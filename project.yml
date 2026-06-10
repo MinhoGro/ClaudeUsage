@@ -1,0 +1,90 @@
+# XcodeGen spec — generates ClaudeUsage.xcodeproj.
+# Two targets: the ObjC menu-bar/floating app (host) + the SwiftUI WidgetKit
+# extension it embeds. Signing team is supplied by build.sh (env DEVELOPMENT_TEAM
+# or auto-detected), NOT hardcoded here — so anyone can build with their own
+# free Apple ID. A Team-ID signature is what lets the widget enter the gallery.
+name: ClaudeUsage
+options:
+  bundleIdPrefix: com.mininghall
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "2.1"
+    CURRENT_PROJECT_VERSION: "26"
+    SWIFT_VERSION: "5.0"
+
+targets:
+  ClaudeUsage:
+    type: application
+    platform: macOS
+    sources:
+      - path: ClaudeUsage.m
+      - path: WidgetReload.swift
+    dependencies:
+      - target: ClaudeUsageWidget
+        embed: true
+      - sdk: Cocoa.framework
+      - sdk: Security.framework
+      - sdk: WidgetKit.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mininghall.ClaudeUsage
+        PRODUCT_NAME: ClaudeUsage
+        SWIFT_OBJC_INTERFACE_HEADER_NAME: ClaudeUsage-Swift.h
+        SWIFT_VERSION: "5.0"
+        GCC_PREPROCESSOR_DEFINITIONS: ["$(inherited)", "HAS_WIDGET_RELOADER=1"]
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        CLANG_ENABLE_OBJC_ARC: YES
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+    info:
+      path: .xcodegen/ClaudeUsage-Info.plist
+      properties:
+        CFBundleName: ClaudeUsage
+        CFBundleDisplayName: Claude 用量监控
+        CFBundleIconFile: AppIcon
+        LSUIElement: true
+        NSHighResolutionCapable: true
+        LSMinimumSystemVersion: "14.0"
+    resources:
+      - path: statusline.py
+        buildPhase: resources
+      - path: AppIcon.icns
+        buildPhase: resources
+
+  ClaudeUsageWidget:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: widget/ClaudeUsageWidget.swift
+    dependencies:
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mininghall.ClaudeUsage.widget
+        PRODUCT_NAME: ClaudeUsageWidget
+        CODE_SIGN_ENTITLEMENTS: widget/widget.entitlements
+        GENERATE_INFOPLIST_FILE: YES
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.0"
+    info:
+      path: .xcodegen/Widget-Info.plist
+      properties:
+        CFBundleName: ClaudeUsageWidget
+        CFBundleDisplayName: Claude 用量
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+
+schemes:
+  ClaudeUsage:
+    build:
+      targets:
+        ClaudeUsage: all
+    run:
+      config: Release

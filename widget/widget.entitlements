@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- App extensions must be sandboxed. We read ONLY this extension's own
+	     container (the floating app mirrors usage.json into it), so no file
+	     exceptions, no network, no app groups — nothing that would require a
+	     provisioning profile. A plain Team-ID signature is enough. -->
+	<key>com.apple.security.app-sandbox</key><true/>
+</dict>
+</plist>

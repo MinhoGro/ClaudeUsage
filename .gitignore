@@ -1,0 +1,15 @@
+# Build output & generated files
+build/
+dist/
+.xcodegen/
+.build/
+ClaudeUsage.app/
+
+# Generated from project.yml by XcodeGen (run ./build.sh)
+ClaudeUsage.xcodeproj/
+
+# macOS
+.DS_Store
+
+# Runtime temp
+*.tmp
