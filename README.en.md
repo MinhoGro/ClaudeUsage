@@ -72,7 +72,7 @@ macOS's widget-gallery daemon `chronod` enforces a signing-trust gate on third-p
 
 The primary source is Anthropic's official usage endpoint `api.anthropic.com/api/oauth/usage`, accessed with **Claude Code's own login token** (read from the `Claude Code-credentials` keychain item or `~/.claude/.credentials.json`).
 
-- **Auto-renew**: when the token is about to expire, the app exchanges its refresh token at the official endpoint for a new one and writes the rotated tokens back to the same store (shared with Claude Code, kept in sync) — so it is self-sustaining and you never need to open Claude Code to renew it. Nothing else is uploaded; everything stays local.
+- **Token renewal**: the Keychain token is renewed by **Claude Code itself** — the widget is **read-only and never writes the Keychain** (writing it resets that item's access control and locks Claude Code out of its own token, causing repeated password prompts). If the token expires while Claude Code hasn't refreshed it for a while, the widget pauses and resumes next time you use Claude Code. The widget only self-renews when the credentials live in the file `~/.claude/.credentials.json` (no ACL concern there). Nothing else is uploaded; everything stays local.
 - Prerequisite: you've logged into `claude` in the terminal with a subscription account. The first keychain read/write may prompt macOS for permission — choose **Always Allow**.
 - The plan (Pro / Max) is auto-detected from the OAuth profile; you can also pick it manually from the menu.
 - **Optional fallback**: Claude Code's `statusLine` hook (`statusline.py`) writes usage to `~/.claude/usage-cache.json`, used when no token is available. Enable it by adding to `~/.claude/settings.json`:

@@ -229,11 +229,13 @@ static void MirrorToWidgetContainer(NSString *planName) {
         rename(tmp.fileSystemRepresentation, path.fileSystemRepresentation);
 }
 
-// ─── Claude Code OAuth token: read + auto-refresh ────────────────
+// ─── Claude Code OAuth token: read (+ refresh only for file creds) ───
 // Source: ~/.claude/.credentials.json, else Keychain "Claude Code-credentials".
-// When the access token is expired we refresh it ourselves using the refresh
-// token and write the rotated tokens back to the SAME source — keeping Claude
-// Code in sync (it reads the same store).
+// File creds: when expired we refresh via the refresh token and write back to
+// the file. Keychain creds: strictly READ-ONLY — we never write the Keychain
+// item (that would reset its ACL and lock Claude Code out of its own token,
+// causing repeated password prompts). On expiry of a Keychain token we simply
+// stop polling until Claude Code refreshes it (it owns that token's lifecycle).
 static NSString *const kCCService     = @"Claude Code-credentials";
 static NSString *const kOAuthClient   = @"9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 static NSString *const kOAuthTokenURL = @"https://api.anthropic.com/v1/oauth/token";
@@ -241,15 +243,15 @@ static NSString *CredsFilePath(void) {
     return [NSHomeDirectory() stringByAppendingPathComponent:@".claude/.credentials.json"];
 }
 
-// Write the full credentials item back to its source. Returns success.
+// Persist refreshed creds — ONLY to the file store. We must NEVER write the
+// Keychain item: SecItemUpdate by a foreign app resets that item's ACL, which
+// evicts /usr/bin/security (the tool Claude Code uses to read its own token),
+// locking Claude Code out and triggering endless keychain-password prompts.
+// So the Keychain is strictly READ-ONLY here; Claude Code owns its own refresh.
 static BOOL PersistCreds(NSDictionary *full, BOOL toFile) {
+    if (!toFile) return NO;   // keychain is read-only — do not disturb its ACL
     NSData *d = [NSJSONSerialization dataWithJSONObject:full options:0 error:nil];
-    if (!d) return NO;
-    if (toFile) return [d writeToFile:CredsFilePath() atomically:YES];
-    NSDictionary *q = @{ (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-                         (__bridge id)kSecAttrService: kCCService };
-    return SecItemUpdate((__bridge CFDictionaryRef)q,
-                         (__bridge CFDictionaryRef)@{ (__bridge id)kSecValueData: d }) == errSecSuccess;
+    return d ? [d writeToFile:CredsFilePath() atomically:YES] : NO;
 }
 
 // Synchronously refresh the access token and persist the rotated tokens.
