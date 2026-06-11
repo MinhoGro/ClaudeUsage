@@ -554,7 +554,10 @@ static CGFloat WidgetHeight(NSUInteger extraRows) {
 // light & dark), and HORIZONTAL BARS (no rings) for every quota — denser and
 // less stacked than rings.
 static const CGFloat MC_W = 264;
-static CGFloat MenuCardHeight(NSUInteger extras) { return 86 + (2 + extras) * 26; }
+// The panel is split into two custom views with a NATIVE separator between them
+// (so the in-panel divider matches the menu's own separators exactly).
+static CGFloat MenuHeaderHeight(void)            { return 44; }
+static CGFloat MenuBarsHeight(NSUInteger extras) { return 6 + (2 + extras) * 26 + 18; }
 
 // Apple's secondary/tertiaryLabelColor are tuned for vibrancy-backed views and
 // render too faint when drawn manually on the menu's dark material. Use higher-
@@ -576,6 +579,7 @@ static NSColor *MenuTertiary(void) {
 
 @interface MenuCardView : NSView
 @property (nonatomic, strong) UsageData *data;
+@property (nonatomic, assign) NSInteger section;   // 0 = header, 1 = bars + footer
 @end
 
 @implementation MenuCardView
@@ -633,35 +637,30 @@ static NSColor *MenuTertiary(void) {
     UsageData *d = self.data;
     const CGFloat W = self.bounds.size.width, PAD = 16;
 
-    // ── plan pill (top-left) ──
-    NSString *plan = d.planName.length ? d.planName : @"—";
-    NSFont *pillF = [NSFont systemFontOfSize:12 weight:NSFontWeightBold];
-    CGFloat pillW = [plan sizeWithAttributes:@{NSFontAttributeName:pillF}].width + 20, pillH = 22;
-    NSRect pill = NSMakeRect(PAD, 14, pillW, pillH);
-    [PlanColor(plan) setFill];
-    [[NSBezierPath bezierPathWithRoundedRect:pill xRadius:pillH/2 yRadius:pillH/2] fill];
-    [self txtC:plan font:pillF color:NSColor.whiteColor cx:PAD + pillW/2 cy:14 + pillH/2];
+    if (self.section == 0) {
+        // ── header: plan pill (left) + reset countdowns (right) ──
+        NSString *plan = d.planName.length ? d.planName : @"—";
+        NSFont *pillF = [NSFont systemFontOfSize:12 weight:NSFontWeightBold];
+        CGFloat pillW = [plan sizeWithAttributes:@{NSFontAttributeName:pillF}].width + 20, pillH = 22;
+        NSRect pill = NSMakeRect(PAD, 11, pillW, pillH);
+        [PlanColor(plan) setFill];
+        [[NSBezierPath bezierPathWithRoundedRect:pill xRadius:pillH/2 yRadius:pillH/2] fill];
+        [self txtC:plan font:pillF color:NSColor.whiteColor cx:PAD + pillW/2 cy:11 + pillH/2];
 
-    // ── reset countdowns (top-right, two lines) ──
-    LimitWindow *fh = d.fiveHour, *sd = d.sevenDay;
-    [self resetRowRight:W - PAD y:14 label:@"5小时重置"
-                  value:(fh.resetsAt ? FmtCountdown(fh.resetsAt) : @"—")];
-    [self resetRowRight:W - PAD y:31 label:@"7天重置"
-                  value:(sd.resetsAt ? FmtCountdown(sd.resetsAt) : @"—")];
+        LimitWindow *fh = d.fiveHour, *sd = d.sevenDay;
+        [self resetRowRight:W - PAD y:11 label:@"5小时重置"
+                      value:(fh.resetsAt ? FmtCountdown(fh.resetsAt) : @"—")];
+        [self resetRowRight:W - PAD y:27 label:@"7天重置"
+                      value:(sd.resetsAt ? FmtCountdown(sd.resetsAt) : @"—")];
+        return;
+    }
 
-    // ── divider under header ──
-    [[NSColor quaternaryLabelColor] setStroke];
-    NSBezierPath *dl = [NSBezierPath bezierPath];
-    [dl moveToPoint:NSMakePoint(PAD, 52)]; [dl lineToPoint:NSMakePoint(W - PAD, 52)];
-    dl.lineWidth = 1; [dl stroke];
-
-    // ── horizontal bar rows: 5小时 / 7天 / per-model ──
-    CGFloat y = 60;
-    [self barRow:fh label:@"5小时剩余" y:y width:W]; y += 26;
-    [self barRow:sd label:@"7天剩余"  y:y width:W]; y += 26;
+    // ── section 1: horizontal bar rows (5小时 / 7天 / per-model) + footer ──
+    CGFloat y = 6;
+    [self barRow:d.fiveHour label:@"5小时剩余" y:y width:W]; y += 26;
+    [self barRow:d.sevenDay label:@"7天剩余"  y:y width:W]; y += 26;
     for (LimitWindow *w in d.extras) { [self barRow:w label:RowLabel(w.key) y:y width:W]; y += 26; }
 
-    // ── footer: freshness + source ──
     NSString *foot;
     if (!d || !d.hasReal) foot = @"暂无数据，等待刷新…";
     else foot = [NSString stringWithFormat:@"更新于%@%@",
@@ -778,16 +777,21 @@ static NSColor *MenuTertiary(void) {
     if (menu != self.statusItem.menu) return;   // only the status menu is dynamic
     [menu removeAllItems];
 
-    // Compact, menu-native panel (transparent bg + semantic colors + small
-    // rings) — blends with the menu instead of a dark card dumped on top.
+    // Two menu-native panels (header + bars) joined by a NATIVE separator, so
+    // the in-panel divider matches the menu's own separators exactly.
     UsageData *d = self.latest ?: [UsageData new];
-    MenuCardView *card = [[MenuCardView alloc] initWithFrame:NSMakeRect(0, 0, MC_W, MenuCardHeight(d.extras.count))];
-    card.data = d;
-    NSMenuItem *cardItem = [[NSMenuItem alloc] init];
-    cardItem.view = card;
-    [menu addItem:cardItem];
 
-    [menu addItem:NSMenuItem.separatorItem];
+    MenuCardView *header = [[MenuCardView alloc] initWithFrame:NSMakeRect(0, 0, MC_W, MenuHeaderHeight())];
+    header.section = 0; header.data = d;
+    NSMenuItem *hItem = [NSMenuItem new]; hItem.view = header; [menu addItem:hItem];
+
+    [menu addItem:NSMenuItem.separatorItem];   // ← native divider (top)
+
+    MenuCardView *bars = [[MenuCardView alloc] initWithFrame:NSMakeRect(0, 0, MC_W, MenuBarsHeight(d.extras.count))];
+    bars.section = 1; bars.data = d;
+    NSMenuItem *bItem = [NSMenuItem new]; bItem.view = bars; [menu addItem:bItem];
+
+    [menu addItem:NSMenuItem.separatorItem];   // ← native divider (bottom)
     NSMenuItem *vis = [[NSMenuItem alloc] initWithTitle:(WidgetHidden() ? @"显示桌面组件" : @"隐藏桌面组件")
                         action:@selector(toggleWidgetHidden:) keyEquivalent:@""];
     vis.target = self; [menu addItem:vis];
@@ -1099,29 +1103,38 @@ static int RenderMenuToPNG(NSString *path) {
     NSMutableDictionary *cfg = LoadConfig();
     NSString *det = cfg[@"detected_plan"], *man = cfg[@"plan_name"];
     d.planName = [man isKindOfClass:NSString.class] ? man : (det ?: @"—");
-    CGFloat h = MenuCardHeight(d.extras.count);
+    CGFloat hh = MenuHeaderHeight(), bh = MenuBarsHeight(d.extras.count), GAP = 11;
+    CGFloat h = hh + GAP + bh;   // header + separator gap + bars
     NSArray<NSAppearanceName> *modes = @[NSAppearanceNameAqua, NSAppearanceNameDarkAqua];
     NSColor *bgs[2] = { [NSColor colorWithWhite:0.96 alpha:1], [NSColor colorWithWhite:0.17 alpha:1] };
 
-    // Render each appearance via cacheDisplayInRect (respects isFlipped + appearance).
-    NSImage *imgs[2];
+    // Render header + bars sections (each respects isFlipped + appearance).
+    NSBitmapImageRep *hrs[2], *brs[2];
     for (int i = 0; i < 2; i++) {
-        MenuCardView *v = [[MenuCardView alloc] initWithFrame:NSMakeRect(0, 0, MC_W, h)];
-        v.appearance = [NSAppearance appearanceNamed:modes[i]];
-        v.data = d;
-        NSBitmapImageRep *vr = [v bitmapImageRepForCachingDisplayInRect:v.bounds];
-        [v cacheDisplayInRect:v.bounds toBitmapImageRep:vr];
-        imgs[i] = [[NSImage alloc] initWithSize:NSMakeSize(MC_W, h)];
-        [imgs[i] addRepresentation:vr];
+        NSAppearance *ap = [NSAppearance appearanceNamed:modes[i]];
+        MenuCardView *hv = [[MenuCardView alloc] initWithFrame:NSMakeRect(0,0,MC_W,hh)];
+        hv.appearance = ap; hv.section = 0; hv.data = d;
+        MenuCardView *bv = [[MenuCardView alloc] initWithFrame:NSMakeRect(0,0,MC_W,bh)];
+        bv.appearance = ap; bv.section = 1; bv.data = d;
+        hrs[i] = [hv bitmapImageRepForCachingDisplayInRect:hv.bounds];
+        [hv cacheDisplayInRect:hv.bounds toBitmapImageRep:hrs[i]];
+        brs[i] = [bv bitmapImageRepForCachingDisplayInRect:bv.bounds];
+        [bv cacheDisplayInRect:bv.bounds toBitmapImageRep:brs[i]];
     }
 
     NSImage *out = [[NSImage alloc] initWithSize:NSMakeSize(MC_W, h*2)];
     [out lockFocus];
-    // light row on top (y=h..2h), dark row below (y=0..h)
-    [bgs[0] setFill]; NSRectFill(NSMakeRect(0, h, MC_W, h));
-    [bgs[1] setFill]; NSRectFill(NSMakeRect(0, 0, MC_W, h));
-    [imgs[0] drawInRect:NSMakeRect(0, h, MC_W, h)];
-    [imgs[1] drawInRect:NSMakeRect(0, 0, MC_W, h)];
+    for (int i = 0; i < 2; i++) {
+        CGFloat base = (i == 0) ? h : 0;   // light on top, dark below
+        [bgs[i] setFill]; NSRectFill(NSMakeRect(0, base, MC_W, h));
+        [brs[i] drawInRect:NSMakeRect(0, base, MC_W, bh)];               // bars at bottom
+        [hrs[i] drawInRect:NSMakeRect(0, base + bh + GAP, MC_W, hh)];    // header at top
+        [(i==0 ? [NSColor colorWithWhite:0 alpha:0.12] : [NSColor colorWithWhite:1 alpha:0.12]) setStroke];
+        NSBezierPath *sp = [NSBezierPath bezierPath];                    // faint separator in the gap
+        [sp moveToPoint:NSMakePoint(0, base + bh + GAP/2)];
+        [sp lineToPoint:NSMakePoint(MC_W, base + bh + GAP/2)];
+        sp.lineWidth = 1; [sp stroke];
+    }
     [out unlockFocus];
 
     NSBitmapImageRep *final = [NSBitmapImageRep imageRepWithData:[out TIFFRepresentation]];
