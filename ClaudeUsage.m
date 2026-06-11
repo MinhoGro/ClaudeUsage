@@ -598,16 +598,6 @@ static NSColor *MenuTertiary(void) {
     [s drawAtPoint:NSMakePoint(cx - sz.width/2, cy - sz.height/2) withAttributes:a];
 }
 
-// label (secondary) + value (primary, bold) right-aligned at rightX, on one line
-- (void)resetRowRight:(CGFloat)rightX y:(CGFloat)y label:(NSString *)label value:(NSString *)value {
-    NSFont *lf = [NSFont systemFontOfSize:10 weight:NSFontWeightRegular];
-    NSFont *vf = [NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightSemibold];
-    NSDictionary *va = @{ NSFontAttributeName: vf };
-    CGFloat vw = [value sizeWithAttributes:va].width;
-    [self txt:value font:vf color:NSColor.labelColor x:rightX y:y align:1];
-    [self txt:label font:lf color:MenuSecondary() x:rightX - vw - 6 y:y + 1 align:1];
-}
-
 // One horizontal bar row: "5小时剩余  [████░░]  26%", vertically centered at row top y (rowH 26).
 - (void)barRow:(LimitWindow *)w label:(NSString *)label y:(CGFloat)y width:(CGFloat)W {
     const CGFloat PAD = 16, barX = 92, barH = 7;
@@ -647,11 +637,20 @@ static NSColor *MenuTertiary(void) {
         [[NSBezierPath bezierPathWithRoundedRect:pill xRadius:pillH/2 yRadius:pillH/2] fill];
         [self txtC:plan font:pillF color:NSColor.whiteColor cx:PAD + pillW/2 cy:11 + pillH/2];
 
+        // reset countdowns: two columns — labels right-aligned to a shared
+        // column (so the 「置」 lines up), values right-aligned at the edge.
         LimitWindow *fh = d.fiveHour, *sd = d.sevenDay;
-        [self resetRowRight:W - PAD y:11 label:@"5小时重置"
-                      value:(fh.resetsAt ? FmtCountdown(fh.resetsAt) : @"—")];
-        [self resetRowRight:W - PAD y:27 label:@"7天重置"
-                      value:(sd.resetsAt ? FmtCountdown(sd.resetsAt) : @"—")];
+        NSString *v5 = fh.resetsAt ? FmtCountdown(fh.resetsAt) : @"—";
+        NSString *v7 = sd.resetsAt ? FmtCountdown(sd.resetsAt) : @"—";
+        NSFont *lf = [NSFont systemFontOfSize:10 weight:NSFontWeightRegular];
+        NSFont *vf = [NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightSemibold];
+        NSDictionary *va = @{ NSFontAttributeName: vf };
+        CGFloat maxVW = MAX([v5 sizeWithAttributes:va].width, [v7 sizeWithAttributes:va].width);
+        CGFloat rightX = W - PAD, labelRX = rightX - maxVW - 10;
+        [self txt:v5 font:vf color:NSColor.labelColor x:rightX y:11 align:1];
+        [self txt:@"5小时重置" font:lf color:MenuSecondary() x:labelRX y:12 align:1];
+        [self txt:v7 font:vf color:NSColor.labelColor x:rightX y:27 align:1];
+        [self txt:@"7天重置"  font:lf color:MenuSecondary() x:labelRX y:28 align:1];
         return;
     }
 
